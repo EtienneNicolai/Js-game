@@ -1,7 +1,6 @@
 
 False Light is an interactive detective game built alsmost entirely in JavaScript. The game features branching dialogue, inventory management, and dynamic narrative flag built to showcase javascript capabilities 
-
----
+(because of how github reads languages it detects the file as 100% html due to all the javascript being in a html file).
 
 Gameplay Features
 
