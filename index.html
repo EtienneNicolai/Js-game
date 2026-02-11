@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>False Light Integrated Acts 1–2</title>
+<style>
+  :root{
+    --bg:#0b0b10; --panel:#0f1724; --muted:#9aa4b2; --accent:#1f2937; --text:#e9eef6;
+  }
+  body{margin:0;font-family:system-ui,Segoe UI,Arial;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100vh}
+  header{background:var(--panel);padding:12px 18px;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.02)}
+  .container{max-width:980px;margin:28px auto;display:flex;gap:16px;padding:18px}
+  .scene{flex:2;background:linear-gradient(180deg,#07101a 0%, #0b1720 100%);border-radius:10px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,0.6);position:relative;overflow:hidden}
+  .scene-image{width:100%;text-align:center;margin-bottom:10px}
+  .scene-image img{max-width:100%;height:auto;border-radius:6px;image-rendering:pixelated;border:1px solid rgba(255,255,255,0.03)}
+  .content{display:flex;gap:12px}
+  .portrait{width:140px;min-width:140px}
+  .portrait img{width:128px;height:auto;border-radius:6px;border:1px solid rgba(255,255,255,0.04);image-rendering:pixelated}
+  .text-area{flex:1;min-height:300px;white-space:pre-wrap;font-family:Georgia, "Times New Roman", serif;padding:6px}
+  .choices{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  button{background:var(--accent);color:var(--text);border:0;padding:10px;border-radius:8px;cursor:pointer;text-align:left}
+  button[disabled]{opacity:0.45;cursor:default}
+  aside{width:260px;background:var(--panel);border-radius:10px;padding:12px;color:var(--muted)}
+  h1,h2{margin:0}
+  footer{padding:12px;text-align:center;color:var(--muted)}
+  .inventory, .flags{font-size:14px;margin-top:8px}
+  .fade{position:fixed;left:0;top:0;width:100%;height:100%;background:#000;opacity:0;pointer-events:none;transition:opacity .35s ease}
+  .fade.show{opacity:1;pointer-events:auto}
+  .small{font-size:13px;color:var(--muted)}
+  .log{max-height:380px;overflow:auto;padding-right:6px}
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:center;max-width:980px;margin:auto">
+    <div><strong>FALSE LIGHT</strong>Detective Kai</div>
+    <div class="small">False Light (Integrated)</div>
+  </div>
+</header>
+
+<div class="container">
+  <main class="scene" id="scene">
+    <div class="scene-image" id="sceneImage"><!-- scene-wide image --></div>
+
+    <div class="content">
+      <div class="portrait" id="portrait"><!-- portrait image --></div>
+
+      <div style="flex:1">
+        <div class="text-area log" id="textArea"></div>
+        <div class="choices" id="choices"></div>
+      </div>
+    </div>
+  </main>
+
+  <aside>
+    <div><strong>Inventory</strong></div>
+    <div class="inventory" id="inventory">—</div>
+    <div style="margin-top:12px"><strong>Flags</strong></div>
+    <div class="flags" id="flags">—</div>
+  </aside>
+</div>
+
+<div class="fade" id="fade"></div>
+<footer>Single-file HTML save locally with the image assets listed in the README above.</footer>
+
+<script>
+/* ====== State & Helpers ====== */
+const textArea = document.getElementById('textArea');
+const choicesEl = document.getElementById('choices');
+const portraitEl = document.getElementById('portrait');
+const sceneImageEl = document.getElementById('sceneImage');
+const inventoryEl = document.getElementById('inventory');
+const flagsEl = document.getElementById('flags');
+const fade = document.getElementById('fade');
+
+const state = {
+  scene: 'act1_scene1',
+  checkedBrief: false,
+  paidForFood: false,
+  visited: { body:false, malik:false, apartment:false },
+  items: [], // strings of items
+  flags: new Set(),
+  scene2EndingShown:false,
+  archiveAcquired:false,
+  korFileOnly: false,
+  korFileDetour: false,
+  strixOnly: false,
+  strixDetour: false,
+};
+
+/* ====== Display Helpers ====== */
+function showSceneImage(src, alt='') {
+  sceneImageEl.innerHTML = src ? `<img src="${src}" alt="${alt}">` : '';
+}
+function showPortrait(src, alt='') {
+  portraitEl.innerHTML = src ? `<img src="${src}" alt="${alt}">` : '';
+}
+function updateInventory() {
+  inventoryEl.textContent = state.items.length ? state.items.join(', ') : '—';
+  flagsEl.textContent = state.flags.size ? Array.from(state.flags).join(', ') : '—';
+}
+
+/* ====== Choices ====== */
+function clearChoices(){ choicesEl.innerHTML=''; }
+function addChoice(label, cb, disabled=false){
+  const b=document.createElement('button');
+  b.textContent=label;
+  if(disabled){ 
+    b.disabled=true; 
+    b.style.opacity=0.5; 
+  } else { 
+    b.onclick=()=>{ cb(); }; 
+  }
+  choicesEl.appendChild(b);
+}
+
+/* ====== Text Helpers ====== */
+function typeText(text, speed = 18){ // returns promise
+  return new Promise(resolve => {
+    let i = 0;
+    const interval = setInterval(() => {
+      textArea.textContent += text.charAt(i);
+      i++;
+      textArea.scrollTop = textArea.scrollHeight;
+      if(i >= text.length){
+        clearInterval(interval);
+        textArea.textContent += '\n\n';
+        textArea.scrollTop = textArea.scrollHeight;
+        resolve();
+      }
+    }, speed);
+  });
+}
+function instantText(text){
+  textArea.textContent += text + '\n\n';
+  textArea.scrollTop = textArea.scrollHeight;
+}
+
+/* ====== Fade & Scene Transitions ====== */
+async function fadeTo(callback, ms = 350){
+  fade.classList.add('show');
+  await new Promise(res => setTimeout(res, ms));
+  if(callback) await callback();
+  fade.classList.remove('show');
+}
+
+/* ====== Inventory & Flags ====== */
+function has(item){ return state.items.includes(item); }
+function addItem(item){ 
+  if(!has(item)) state.items.push(item); 
+  updateInventory(); 
+}
+function setFlag(f){ 
+  state.flags.add(f); 
+  updateInventory(); 
+}
+
+
+/* ====== Scenes ====== */
+
+/* ACT 1 SCENE 1: Diner */
+async function act1_scene1(){
+  state.scene='act1_scene1';
+  textArea.textContent=''; showSceneImage(''); showPortrait('detective.png','Detective Kai');
+  await typeText("The scene opens in a diner where you've been eating an apple pie and drinking a shoddy coffee for the past 30 minutes. You're Detective Kai from Chicago glory days faded, mediocrity accepted. Still, your record has earned you a reassignment to New York to investigate the murder of a journalist.");
+  renderScene1Choices();
+}
+
+function renderScene1Choices(){
+  clearChoices();
+  if(!state.checkedBrief) addChoice('Check brief', async()=>{ await typeText("You check the brief: target Britney Korr, investigating harbour crime ring. Multiple 9mm bullet wounds, bruises around wrists, no forced entry; neighbors heard shots."); state.checkedBrief=true; renderScene1Choices(); });
+  if(!state.paidForFood) addChoice('Pay for food', async()=>{ await typeText("You flip open your weathered leather wallet and slide a bill onto the table atop the receipt."); state.paidForFood=true; renderScene1Choices(); });
+  if(state.checkedBrief && state.paidForFood) addChoice('Leave for the crime scene', ()=>{ fadeTo(()=>{ act1_scene2(); }); });
+}
+
+/* ACT 1 SCENE 2: Crime Scene (Apartment) */
+async function act1_scene2(){
+  state.scene='act1_scene2';
+  textArea.textContent=''; showSceneImage('Apartment.png','Apartment Building'); showPortrait('detective.png','Detective Kai');
+  await typeText("It's very late. You approach the hotel room where the murder happened. The entire floor is sectioned off and police radio chatter echoes in the hall. You flash your badge and get through. It's late you may not have time to get everything. Pick carefully.");
+  renderScene2Choices();
+}
+
+function renderScene2Choices(){
+  clearChoices();
+  addChoice('Inspect the body' + (state.visited.body ? ' (done)':''),
+    ()=>{ if(!state.visited.body){ state.visited.body=true; inspectBody(); } }, state.visited.body);
+  addChoice('Talk to police on scene' + (state.visited.malik ? ' (done)':''), ()=>{ if(!state.visited.malik){ state.visited.malik=true; talkToMalik(); } }, state.visited.malik);
+  addChoice('Inspect the apartment' + (state.visited.apartment ? ' (done)':''), ()=>{ if(!state.visited.apartment){ state.visited.apartment=true; inspectApartment(); } }, state.visited.apartment);
+  maybeShowScene2Ending();
+}
+
+/* Inspect body */
+async function inspectBody(){
+  showPortrait('detective.png','Detective Kai');
+  await typeText("You lift the sheet. It's Britney Korr. Multiple entry wounds around the torso; wrists bruised and broken skin suggesting a struggle. Number of shots and lack of head injuries suggests panic or sloppy hit, not professional. Clothing suggests she was at home.");
+  renderScene2Choices();
+}
+
+/* Talk to Malik */
+async function talkToMalik(){
+  showPortrait('malik.png','Officer Malik');
+  await typeText("You spot the lead investigator, Officer Malik short, stout, gruff. 'Evenin' detective. We're closing up, make it quick. Victim died about three hours ago; forensics checking prints.'");
+  clearChoices();
+  addChoice('Inquire about the bruises', async()=>{ await typeText("Malik: 'Coulda been cuffers. Not too hard for criminals to get their hands on those.'"); await endMalikTalk(); });
+  addChoice('Inquire about method of entry', async()=>{ await typeText("Malik: 'We suspect entry through the window. No forced entry; front door locked on arrival.'"); await endMalikTalk(); });
+}
+async function endMalikTalk(){
+  await typeText("Malik: 'I know you likely have more Qs, but it's late. We'll take the body for further examination. You'll have forensics in the morning.'");
+  renderScene2Choices();
+}
+
+/* Inspect Apartment */
+async function inspectApartment(){
+  showSceneImage('apartment.png','Crime Scene Interior'); showPortrait('detective.png','Detective Kai');
+  await typeText("A small NYC apartment cheap, tidy. Spaghetti on the table, likely eaten just before the attack. Bedroom: Britney collapsed against the bed, blood on the floor; wooden frame splintered, maybe used to restrain. Window fogged, locked, no damage.");
+  await typeText("You search drawers, under the bed, wardrobe. You find two items of interest: a well-used crowbar and a small external hard drive. You pocket both.");
+  addItem('Crowbar'); addItem('Hard Drive');
+  renderScene2Choices();
+}
+
+/* show ending only after body + malik + apartment visited */
+async function maybeShowScene2Ending(){
+  if(state.visited.body && state.visited.malik && state.visited.apartment && !state.scene2EndingShown){
+    state.scene2EndingShown = true;
+    await typeText("You decide to finish up and sleep at the station tonight. You have a lot of investigating to do in the morning.");
+    clearChoices();
+    addChoice('Continue → Morning (Act 2)', ()=>{ fadeTo(()=>{ act2_morning(); }); });
+  }
+}
+
+/* ===== ACT 2: Morning & Apex Interview ===== */
+
+async function act2_morning(){
+  state.scene='act2_morning';
+  textArea.textContent=''; 
+  showSceneImage(''); 
+  showPortrait('detective.png','Detective Kai');
+
+  let morningText = "The morning is just as dreary as last night but now you have some potential leads to investigate. You fire up your laptop.";
+  if(has('Crowbar')){
+    morningText += " You remember the item you took from the scene: the crowbar. Its recent use indicates perhaps last night maybe she was doing some journalistic work?";
+  }
+  await typeText(morningText);
+
+  renderAct2Choices();
+}
+
+function renderAct2Choices(){
+  clearChoices();
+
+  // Option A4: Search Britney's journalistic work
+  if(!state.flags.has('researched_blog')){
+    addChoice('Search her journalistic work', async()=>{
+      showPortrait('detective.png','Detective Kai');
+      await typeText("Searching Britney's name brings up her personal blog. She used to work at a proper news company, maybe she quit or lost her job. Her posts dig into local corruption and allege a local security firm: 'ApexSecurity'. They have an office on the harbour; seems like they have means and motive to silence her.");
+      setFlag('researched_blog');
+      enableInvestigationOptions();
+    });
+  }
+
+// Option B4: Analyse the hard drive (only if you have it)
+if(has('Hard Drive') && !state.flags.has('analysed_hard_drive')){
+    addChoice('Analyse the hard drive', async()=>{
+        showPortrait('detective.png','Detective Kai');
+        await typeText("You fire up the hard drive. Files link to 'ApexSecurity' paying off local groups, shadowy overseas operations, and war crime connections. Focused heavily on the local office, with layout and important rooms marked: database, head office, security system, power box behind bins.");
+        setFlag('analysed_hard_drive');
+        if (!has('Hard Drive')) addItem('Hard Drive');
+        enableInvestigationOptions();
+    });
+}
+  // Direct confrontation/sneak in options only appear after research
+  function enableInvestigationOptions(){
+    clearChoices();
+    addChoice('Direct confrontation at Apex (A5)', ()=>{ act2_direct_confront(); });
+    addChoice('Sneak in after hours (B5)', ()=>{ act2_sneak_options(); });
+  }
+}
+
+/* ---- DIRECT CONFRONTATION path (A5) ---- */
+async function act2_direct_confront() {
+  state.scene = 'act2_direct';
+  textArea.textContent = '';
+  showPortrait('detective.png', 'Detective Kai');
+  showSceneImage('policestation.png', 'Apartment / Office');
+
+  await typeText("As a more independently minded detective, you are no stranger to tense and direct interrogations, so this should hopefully be familiar to you. You decide to have a sleep and co-ordinate with the local department.");
+  await typeText("Early the next morning, you find Officer Malik and 2 other officers talking in the local office. You walk up to him and he locks eyes with you, looking mildly perturbed.");
+
+  showPortrait('Malik.png', 'Malik');
+  await typeText("Malik: 'Mornin detective. I'd assume you would like to hear what we found out about the murder.'");
+  await typeText("He walks to a table and commences making a coffee.");
+  showPortrait('Malik.png', 'Malik');
+  await typeText("Malik: 'Wellllll, to us it looks like a pretty shoddy robbery gone wrong. Not much else important on the scene, we didn’t pick up any prints either, so mostly a dead end.'");
+
+  clearChoices();
+  addChoice('"Dam. Well, I found some important information about Apex Security, so I am going to pay them a visit shortly" (A7)', async () => {
+    showPortrait('detective.png', 'Detective Kai');
+    await typeText("You: 'I found important info on Apex Security. I'm going to their office.'");
+
+    showPortrait('Malik.png', 'Malik');
+    await typeText("Malik goes cold. 'That's a very hasty decision. I would’ve thought a detective like you would be more careful and precise about his investigation. I would urge you to reconsider. Anyway, my team and I have to work on the autopsy; I'll let you know if we find out anything.'");
+    await typeText("With that, he walks off, clearly peeved about your investigation.");
+    setFlag('told_malik_direct');
+
+    clearChoices();
+    addChoice("Continue to Apex Security's office", () => apex_office_lobby());
+  });
+
+  addChoice('"I found stuff online about the victim and it seems they had been investigating Apex Security, know anything about them?" (B7)', async () => {
+    showPortrait('detective.png', 'Detective Kai');
+    await typeText("You: 'She was investigating Apex Security. Know anything?'");
+
+    showPortrait('Malik.png', 'Malik');
+    await typeText("Malik: 'We know she had been doing some news article on them, but it's quite a jump to assume they did it. Doubt such a big company would resort to assassinating a small journalist they have bigger fish to fry.'");
+
+    clearChoices();
+    addChoice('Mention you are going to their office for questioning (A8)', async () => {
+      showPortrait('Malik.png', 'Malik');
+      await typeText("Malik: 'Don’t do it. You risk antagonising them. I urge you to reconsider.' You say your goodbyes and move on.");
+      setFlag('malik_warned');
+
+      clearChoices();
+      addChoice("Continue to Apex Security's office", () => apex_office_lobby());
+    });
+
+    addChoice('Omit your investigation and say you will consider his thoughts (B8)', async () => {
+      showPortrait('detective.png', 'Detective Kai');
+      await typeText("You: 'Thanks for the consideration. I'll ponder on it further.' You move on, fully intending to continue your investigation.");
+
+      clearChoices();
+      addChoice("Continue to Apex Security's office", () => apex_office_lobby());
+    });
+  });
+}
+
+
+/* --- Apex Office Lobby with Receptionist Portrait --- */
+async function apex_office_lobby() {
+  state.scene = 'apex_lobby';
+  textArea.textContent = '';
+  showSceneImage('office.png', 'Apex Office Building'); // Office background
+  showPortrait('detective.png', 'Detective Kai');
+
+  await typeText("The day passes to the afternoon. Your car has been parked near the Apex Security office for a while, and you have been observing movements. So far, nothing too crazy. You take your time and walk in.");
+  await typeText("You enter a pretty modern looking office with some very nice furniture. You walk up to the office lady, a very tired looking blonde.");
+  await typeText("You: 'I am a detective with New York PD.' (You flash your badge) 'I'd like to have a chat with whoever is in charge at this office.' You realize you hadn’t really investigated who you would be talking to.");
+  showPortrait('Receptionist.png', 'Receptionist');
+  await typeText("Receptionist raises an eyebrow at your intro, clearly not that impressed.");
+  await typeText("Receptionist: 'Well, I’m sorry but our local director is currently busy. You will have to wait for his next available appointment in 2 hours.'");
+  await typeText("You glance around the pristine lobby, a place that smells strongly of disinfectant and money. Polished chrome fixtures, glass walls, and a faint hum from servers somewhere deeper inside. If there was ever an example of a sketchy company, this would be it.");
+  await typeText("You check your watch. Two hours is a long time to sit around when you are working against the clock to solve a case.");
+
+  clearChoices();
+
+  addChoice('Wait it out and observe the environment discreetly (A9)', async () => {
+    await typeText("You decide patience might yield more than aggression. You sit down in the waiting area, pulling out your phone, pretending to scroll while your eyes do most of the work.");
+    await typeText("Employees come and go but nothing out of the ordinary happens. After a while, the receptionist escorts you to Conference Room 3.");
+    apex_meeting(false);
+  });
+
+  addChoice('Push harder, insist on speaking to the director immediately (B9)', async () => {
+    await typeText("You lean slightly over the receptionist’s desk, keeping your voice calm but authoritative.");
+	showPortrait('detective.png', 'Detective Kai');
+    await typeText("You: 'Listen, this isn’t a social call. A woman was murdered, and your company’s name is on my notes. If your director doesn’t want NYPD asking louder questions, I suggest he finds the time now.'");
+    await typeText("The woman stiffens, then glances toward a camera in the corner. She picks up a phone, murmurs something, then nods stiffly.");
+    await typeText("Receptionist: 'Fine. He'll see you in ten minutes. Conference Room 3.' You can feel the weight of being watched as you walk down the hallway.");
+
+    clearChoices();
+    addChoice('Proceed directly to the conference room (A10)', () => apex_meeting(false));
+    addChoice('Take a detour try restricted area (B10)', () => apex_detour());
+  });
+}
+
+
+/* --- Apex Meeting: show Vance (executive.png) --- */
+async function apex_meeting(tookDetour) {
+    state.scene = 'apex_meeting';
+    textArea.textContent = '';
+    showSceneImage('office.png', 'Apex Office Building'); // Office background
+    showPortrait('executive.png', 'Mr. Vance');
+
+    // reset flags
+    state.korFileOnly = false;
+    state.korFileDetour = false;
+    state.strixOnly = false;
+    state.strixDetour = false;
+
+    if (tookDetour) {
+        await typeText("You find Conference Room 3, its door slightly ajar. Inside sits a man in a sharp suit. Early 50s, silver hair, no tie. He doesn’t look surprised to see you; in fact, it feels like he’s been expecting you.");
+        await typeText("“Detective,” he says smoothly, his voice low but steady. “I’m Mr. Vance, local director. I heard you had questions? did you enjoy the look around.”");
+    } else {
+        await typeText("You find Conference Room 3, its door slightly ajar. Inside sits a man in a sharp suit. Early 50s, silver hair, no tie. He doesn’t look surprised to see you; in fact, it feels like he’s been expecting you.");
+        await typeText("“Detective,” he says smoothly, his voice low but steady. “I’m Mr. Vance, local director. I heard you had questions.”");
+    }
+
+    await typeText("You take a seat opposite him. His eyes don’t blink much.");
+    await typeText("“Well,” you say, “I’m following up on the murder of a journalist named Britney Kor. We have reason to believe she was investigating Apex Security before her death.”");
+    await typeText("He smiles faintly, a politician’s smile. “Terrible tragedy,” he says. “But I assure you, we had no dealings with Miss Reeves. She sent a few inquiries through our media department months ago, but we never replied.”");
+    await typeText("Something about his tone feels rehearsed. You spot a small security camera in the corner of the room, red light blinking.");
+
+  clearChoices();
+  addChoice('Press him harder (A11)', async () => {
+    await typeText("You lean forward, locking eyes with Mr. Vance.");
+    await typeText("“Come on, Vance. I’ve been around too many boardrooms to believe that story. A journalist with significant dirt on your company is investigating and threatening you, and a few months later she turns up dead that’s a little more than coincidence.”");
+    await typeText("For a moment, his calm façade twitches. He adjusts his cufflinks before replying.");
+    await typeText("“I think you overestimate how important a small time reporter was to a corporation like ours, Detective. But since you’re so determined…”");
+    await typeText("He taps a button on the sleek touchpad embedded in the table. A screen flickers to life, showing a chain of brief email logs.");
+    await typeText("Britney Kor: 'Following up on reports of private surveillance misused by your contractors…'");
+    await typeText("Apex Security PR: 'We do not comment on internal policy or speculative inquiries.'");
+    await typeText("That’s all. No threats, no red flags but the metadata catches your eye. The timestamp on their “final” email is prior to one that isn’t displayed.");
+    await typeText("“Looks like something’s missing,” you say.");
+    await typeText("Vance’s voice sharpens just slightly. “That’s the entire exchange. I’ll have to ask you not to make baseless accusations, Detective. You have what you came for.”");
+
+    clearChoices();
+    addChoice('Call him out on missing metadata (A12)', async () => {
+      await typeText("You don’t blink. “That’s not the entire exchange, Vance. Metadata doesn’t lie. There’s another message one that didn’t make it onto your little highlight reel.”");
+      await typeText("Vance’s expression freezes, polite but paper thin. “Detective, we’re a private security firm, not a public archive. You have no clearance for our internal communications, and I’m certainly not obligated to indulge every suspicion you conjure.”");
+      await typeText("You lean forward, voice low. “You just told me transparency’s company policy. Was that a lie?”");
+      await typeText("He exhales slowly through his nose, not quite anger, exactly, but irritation wrapped in restraint.");
+      await typeText("“Detective, I’m beginning to see why your department sent you rather than one of their own. You have initiative. But initiative without jurisdiction can be a dangerous thing.”");
+      await typeText("You tilt your head. “Funny, considering you seem to know a lot about what my department’s doing.”");
+      await typeText("He taps the touchpad again. The screen blanks. “This interview is over.”");
+	  await typeText("Vance smirks. “You could try. Though if your department already has a file on Miss Kor, I’d suggest you check it before making any more assumptions. It might save you some embarrassment.””");
+	  await typeText("But Vance is already standing, smoothing his tie. “Good day, Detective.”You stare at him for a moment, then turn and leave.”");
+		
+      // Set Kor file flags based on detour
+      if (tookDetour) state.korFileDetour = true;
+      else state.korFileOnly = true;
+
+      await finalizeInterview();
+    });
+
+    addChoice('Pretend to drop it, note discrepancy (B12)', async () => {
+      // Set Kor file flags based on detour
+      if (tookDetour) state.korFileDetour = true;
+      else state.korFileOnly = true;
+
+      await typeText("You pretend to accept it, file the discrepancy mentally and leave.");
+      await finalizeInterview();
+    });
+  });
+
+  addChoice('Play it cool (B11)', async () => {
+    await typeText("You give Vance a measured nod, easing back in your chair.");
+    await typeText("“No need to get defensive, Mr. Vance. I’m just here to clarify the loose ends. Everyone’s trying to make sense of this thing.”");
+    await typeText("He exhales softly, the faintest hint of a smile returning. “That’s good to hear. It’s refreshing to meet someone who still values reason.”");
+    await typeText("You match his calm. “Then maybe you can help me understand what exactly was Miss Britney looking into?”");
+    await typeText("Vance gestures toward a small glass wall display, a scrolling timeline of company achievements and project launches.");
+    await typeText("“She was asking questions about one of our older contracts,” he says. “A municipal surveillance trial. Outdated tech, frankly. We discontinued it last year after the city cut funding.”");
+    await typeText("You study the display. Among the polished marketing slogans, one project name flickers briefly before being replaced by another:");
+    await typeText("“Civic Sentinel: Pilot Program 2032.”");
+    await typeText("You catch the reflection of Vance’s eyes in the glass he notices you noticing.");
+    await typeText("“That was just a research partnership,” he says quickly. “Public safety analytics, crowd monitoring nothing controversial. Britney seemed to think we were weaponizing it or selling data offshore. It’s absurd.”");
+    await typeText("He chuckles, but his tone carries a trace of strain.");
+    await typeText("You jot a note. “And these ‘analytics,’ who were they shared with?”");
+    await typeText("“Just local authorities,” Vance replies, too quickly. “We have full transparency with our partners.”");
+    await typeText("You let a small silence hang in the air before standing. “Transparency’s a good policy, Director. Keep practicing it, might just save you down the line.”");
+    await typeText("He smiles, polite but tight. “Of course, Detective. I’ll have my assistant send over that public report Britney was so interested in. It should clear things up.”");
+    await typeText("You nod and go for the door. As you leave, you notice a small plaque beside the wall display:");
+    await typeText("Data Preservation Courtesy of Strix Systems, a subsidiary of Apex Global.");
+    await typeText("You’ve heard of Strix systems they contract “predictive policing algorithms.” For local PD, that means your department is compromised. Britney wasn’t chasing gossip. She was chasing proof.");
+
+    // Set Strix flags based on detour
+    if (tookDetour) state.strixDetour = true;
+    else state.strixOnly = true;
+
+    await finalizeInterview();
+  });
+}
+/* --- finalizeInterview --- */
+async function finalizeInterview() {
+  clearChoices();
+  addChoice('Continue to Apex Meeting exit', async () => {
+    instantText('--- End of Apex Meeting ---');
+
+    // Begin fade
+    fade.classList.add('show');
+    await new Promise(resolve => setTimeout(resolve, 350)); // fade out
+
+    // State update and Act 3 start
+    state.apexInterview = true;
+    textArea.textContent = '';
+    showPortrait('', '');
+    showSceneImage('', '');
+
+    fade.classList.remove('show'); // fade back in
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    // Now safely call Act 3
+    await act3();
+  });
+}
+/* --- B10: Apex Detour Data Operations --- */
+async function apex_detour() {
+  state.scene = 'apex_detour';
+  textArea.textContent = '';
+  showSceneImage('office.png', 'Apex Office Building'); 
+  showPortrait('detective.png', 'Detective Kai');
+
+  await typeText("You take the long corridor toward the conference rooms, but curiosity tugs at you. A door marked “Data Operations – Authorized Access Only” stands slightly ajar. No one’s watching.");
+  await typeText("You step inside. The hum of machines fills the air, and blue monitor light flickers off cold metal walls. Racks of servers line the room like silent sentinels.");
+  await typeText("On a maintenance terminal, a single USB drive is plugged in labeled simply “Field Archive: Contract Surveillance Logs.”");
+  await typeText("You glance at a nearby monitor displaying code and encrypted entries. One catches your eye: RE: “external communications”");
+  await typeText("Your pulse steadies. This could be the connection she died chasing.");
+  await typeText("Just then, a young IT technician walks in, startled but not alarmed.");
+  await typeText("“Oh sorry, detective! I didn’t realize you’d been cleared to review our archives already.” He chuckles nervously. “Boss said you might drop by before your meeting.”");
+
+  clearChoices();
+  addChoice('Take USB and inspect (A11)', async () => {
+    await typeText("You take the USB drive and examine its contents briefly client logs, internal audits, old contracts. Enough to be important.");
+    addItem('Archive Databank'); state.archiveAcquired = true;
+    await typeText("Item acquired: Archive Databank");
+
+    clearChoices();
+    addChoice('Continue to Apex Meeting', async () => {
+      await apex_meeting(true);
+    });
+  });
+
+  addChoice('Leave quietly, take USB without inspection (B11)', async () => {
+    addItem('Archive Databank'); state.archiveAcquired = true;
+    await typeText("Item acquired: Archive Databank");
+
+    clearChoices();
+    addChoice('Continue to Apex Meeting', async () => {
+      await apex_meeting(true);
+    });
+  });
+
+  addChoice('Skip detour entirely', async () => {
+    clearChoices();
+    addChoice('Continue to Apex Meeting', async () => {
+      await apex_meeting(false);
+    });
+  });
+}
+
+/* B5: Sneak-In Path */
+async function act2_sneak_options() {
+  state.sneakIn = true;
+  textArea.textContent = '';
+  showPortrait('detective.png', 'Detective Kai');
+
+  await typeText("You check your watch 1:47 AM. You are sitting in your truck off the beaten path; the streets have long gone quiet and now is your time to strike. You exit your truck, letting your silhouette be swallowed by the darkness and slipping into a back alley around the office. This certainly isn’t your first rodeo.");
+  await typeText("As you assess your options, you spot a heavy metal door clearly meant for maintenance crews. You also notice a ladder leading up to the roof a less direct option, but perhaps easier to manage and could open up more possibilities.");
+
+  clearChoices();
+  addChoice('Try the maintenance door (no crowbar)', async () => {
+    await typeText("It’s no good the door is jammed shut. You can’t do this by hand.");
+    await act2_sneak_options();
+  });
+
+  addChoice('Pry open the maintenance door (requires crowbar)', async () => {
+    if (!has('Crowbar')) {
+      await typeText("You realize you don’t have a crowbar. You can’t pry it open.");
+      await act2_sneak_options();
+      return;
+    }
+    await typeText("You brace the crowbar against the seam and pull. The metal flexes a loud thunk echoes through the alley. You freeze, counting the seconds. After a tense silence, you try again.");
+    await typeText("Push. Push. SNAP. The door gives, just wide enough for you to slip through. You move inside.");
+    await typeText("A narrow maintenance corridor stretches ahead, pitch black. You make your way through, the hum of distant servers vibrating through the walls. The path splits, and you pause unsure what you’re looking for.");
+    await insideMaintenance();
+  });
+
+  addChoice('Climb the ladder to go above the office block', async () => {
+    await typeText("You opt to take the quieter route that door seemed too tough anyway. The ladder rattles softly as you climb. At the top, the roof is a graveyard of vents and machinery. You move low, keeping to the shadows until a loose vent cover catches your eye. A way in.");
+    await insideLadder();
+  });
+}
+
+/* ---- Inside maintenance path ---- */
+async function insideMaintenance() {
+  textArea.textContent = '';
+  await typeText("The narrow corridor hums faintly with electricity. The air smells of dust and metal. You pause, trying to decide where to go next...");
+
+  clearChoices();
+  addChoice('Load up the map from Britney Kor’s Hard Drive', async () => {
+    clearChoices();
+    if (has('Hard Drive')) {
+      await typeText("You pull up the Hard Drive’s map on your phone, flipping through the stored data. The layout flickers to life, and you pinpoint your position. Britney had marked one room nearby with an X.");
+      await typeText("You trace your route two doors ahead, then right past the Security Access point. Using the crowbar, you wedge open a worn keypad and the latch pops free. Inside, humming servers bathe the room in blue light.");
+      await typeText("You need a login, but Britney had one saved with the map. You use it, and the system opens: directories, encrypted folders, system contracts.");
+      await typeText("Then you find it: /Apex_Subdivision/Internal/Coalesce/. You scroll deeper contracts between Apex Systems and the local PD, all filed under a shell company: Strix Systems.");
+      await typeText("A memo, partially decrypted, reads: “Joint surveillance and evidence filtering agreement. Operational discretion approved. Apex analytics to manage data inflow for PD review.”");
+      await typeText("Further down, a note jumps out Officer Malik named as the liaison. And the login you’re using? It was accessed the night before Britney Kor’s death.");
+      await typeText("You copy everything important and log out fast. The air feels heavier now. Malik’s ties to Apex compromise everything. This isn’t just a job anymore.");
+      setFlag('analysed_hard_drive');
+		if (!has('Full Apex Server Data')) addItem('Full Apex Server Data');
+		state.fullApexData = true;       
+		state.partialApexData = false;   
+
+    } else {
+      await typeText("You wander aimlessly through the maze of hallways. Eventually, you stumble into a communications hub papers scattered everywhere.");
+      await typeText("Rifling through drawers, you find one document that makes your skin crawl: 'Strix Systems Monthly Transfer Report'. Recipient: PD Special Liaison Division. Note: 'All Apex invoices rerouted through Strix Systems for discretion.'");
+      await typeText("You pocket the page and back away quickly. You don’t have the full picture, just fragments but Apex, Strix, and the PD shouldn’t all appear in the same sentence.");
+      if (!has('Secret Document')) addItem('Secret Document');
+      state.secretDocument = true;
+    }
+    await end_sneak_in();
+  });
+
+  addChoice('Search manually without Hard Drive', async () => {
+    clearChoices();
+    await typeText("You fumble through drawers and files. Most of it is junk invoices, correspondence until one sheet catches your eye.");
+    await typeText("'Strix Systems Monthly Transfer Report.' Recipient: PD Special Liaison Division. ‘All Apex invoices rerouted through Strix Systems for discretion.’");
+    await typeText("You pocket the document. Fragments, but enough to suggest something rotten between the police and Apex.");
+    if (!has('Secret Document')) addItem('Secret Document');
+    state.secretDocument = true;
+    await end_sneak_in();
+  });
+}
+
+/* ---- Inside ladder path ---- */
+async function insideLadder() {
+  textArea.textContent = '';
+  await typeText("You crawl into the vent, the metal echoing beneath you. The air is tight and stale. A sliver of light spills through a grate ahead.");
+
+  clearChoices();
+  addChoice('Use Hard Drive Map if available', async () => {
+    clearChoices();
+    if (has('Hard Drive')) {
+      await typeText("You pull up the Hard Drive Map on your phone, its blueprint overlaying in your mind. The Data Storage Room sits two floors below, southeast corner.");
+      await typeText("You crawl through the ducts until faint light bleeds through a grate rows of servers, monitors, coffee cups below. You drop silently to the floor, unseen.");
+      await typeText("At a nearby terminal, you access the system. A hidden folder flashes under network logs: /Strix_Systems/Sync_PD/Coalesce/. The login prompt stops you until you recall Britney’s saved credentials.");
+      await typeText("You input them, and after a tense moment, access is granted. Evidence floods the screen Strix Systems working with the PD, monetary transfers, and a named liaison: Officer Malik.");
+      await typeText("You copy what you can. Partial data, but enough to implicate them both. Time to go before you’re discovered.");
+      setFlag('analysed_hard_drive');
+      if (!has('Partial Apex Server Data')) addItem('Partial Apex Server Data');
+      state.partialApexData = true;
+    } else {
+      await typeText("You worm through the vent until you can peer into an office below walls plastered with memos, invoices, and security rosters.");
+      await typeText("One page catches your eye under a desk lamp: 'Strix System Data Services – PD Liaison Transfer (Confidential)'. Handled through Apex internal routing do not disclose to press or external audits.");
+      await typeText("You try to snap a photo through the grate, the angle awkward. Still, you’ve seen enough to know there’s a connection between the PD and Apex.");
+      if (!has('Photo: Strix')) addItem('Photo: Strix');
+		state.photoOnly = true;
+
+    }
+    await end_sneak_in();
+  });
+  
+  addChoice('No Hard Drive Map', async () => {
+    clearChoices();
+    await typeText("You inch closer to the grate, camera ready. The office below is quiet memos, invoices, all the usual noise until one file draws your eye: 'Strix System Data Services PD Liaison Transfer (Confidential)'.");
+    await typeText("You snap a photo and retreat before anyone spots you. Not much, but enough to raise suspicion.");
+    if (!has('Secret Document')) addItem('Secret Document');
+    state.secretDocument = true;
+    await end_sneak_in();
+  });
+}
+
+/* ---- End Sneak-In ---- */
+async function end_sneak_in() {
+  clearChoices();
+  await typeText("You slip away into the night another shadow, another secret uncovered. But this one feels heavier. Malik’s name lingers in your mind.");
+
+  clearChoices();
+  addChoice('Proceed to Act 3', async () => {
+    clearChoices();
+    instantText('--- End of Act 2 (Sneak-In) ---');
+
+    // Fade to black first
+    fade.classList.add('show');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // Clear scene
+    state.sneakIn = true;
+    textArea.textContent = '';
+    showPortrait('', '');
+    showSceneImage('', '');
+
+    // Fade back in
+    fade.classList.remove('show');
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    // Start Act 3
+    await act3();
+  });
+}
+
+
+/* ===== ACT 3 ===== */
+async function act3() {
+    textArea.textContent = '';
+    showSceneImage('policestation.png', 'Precinct'); // show the precinct image
+    showPortrait('detective.png', 'Detective Kai');
+
+    async function displaySection(sectionText) {
+        return new Promise((resolve) => {
+            textArea.textContent = sectionText;
+            clearChoices();
+            addChoice('Continue', resolve);
+        });
+    }
+
+    // ===== APEX INTERVIEW PATH =====
+if (state.apexInterview) {
+  let section = "You exit the office with a renewed sense of anxiety; there is definitely cause for concern about the case.\n";
+
+  // Strix branch (cool path)
+  if (state.strixDetour || state.strixOnly) {
+    section += "Some cursory browsing and cross-referencing with Britney Kor’s work reveals that Strix Systems has a contract with the PD. Can you trust them?\n";
+  }
+
+  // Kor file branch (hard press path)
+  if (state.korFileDetour || state.korFileOnly) {
+    section += "The file mentioned by Vance seems important no way the PD would keep that from you. You may want to ask Malik about this.\n";
+  }
+
+  // Optional databank reminder
+  if (state.archiveAcquired) {
+    section += "You can’t process the databank here; might want to leave that to the office.";
+  }
+
+  await displaySection(section);
+}
+
+    // ===== SNEAK-IN PATH =====
+    if (state.sneakIn) {
+        let section = "You’re still running hot as you slide back into your truck, adrenaline coursing through you. You’ve got what you came for maybe more than you were ready to see.\n";
+
+        if (state.fullApexData) {
+            section += "You connect your phone and dump the contents into a clean drive. Encrypted contracts, payment records, login trails.\n";
+            section += "And there it is again: Officer Malik official liaison between Apex and Strix Systems.\n";
+            section += "Your head spins as the timelines click into place. Britney Kor’s stolen login. Malik’s access timestamped the night before she died.\n";
+            section += "He wasn’t investigating her murder he was covering it. You stare at the screen until the weight of it all presses on your chest.\n";
+            section += "You have enough to take Malik maybe even Apex down. But evidence like this has a way of vanishing, and so do the people holding it.";
+        } else if (state.secretDocument) {
+            section += "You unfold the crumpled document under the truck’s cabin light.\n";
+            section += "“Strix Systems. Monthly Transfers. PD Liaison Division.” It’s not a smoking gun, but it’s proof of money changing hands.\n";
+            section += "There’s a phone number scrawled on the corner maybe internal, maybe personal. The name beside it reads simply: Malik.";
+        } else if (state.partialApexData) {
+            section += "You scroll through what you could recover file fragments, payment chains, operation logs.\n";
+            section += "You don’t have everything, but one name repeats in multiple directories: Officer Malik Data Compliance Authorization.\n";
+            section += "Britney’s investigation must have led her to him.";
+        } else if (state.photoOnly) {
+            section += "You open the grainy photo from the vent. The words “PD Liaison” and “Strix Systems” are barely legible, but enough to draw a connection.";
+        }
+        await displaySection(section);
+    }
+
+    // ===== ARRIVAL AT PRECINCT =====
+    await displaySection(
+        "You pull up to the precinct, clearly exhausted and anxious. It's very late highly unlikely anyone else is still in office. You spot a single car in the lot. Malik’s?\n" +
+        "A wave of anxiety washes over you. You breathe carefully and take all your gear: your gun, a classic police revolver, and your cuffs.\n" +
+        "As you fling the doors to the office open, you see Malik standing in the centre of the main lobby.\n" +
+        "“And where have you been snooping?” he grumbles smugly. He seems confident."
+    );
+
+    clearChoices();
+    addChoice('Aggressive approach (high risk, high reward)', async () => await aggressivePath());
+    addChoice('Interrogate (safe, lower potential)', async () => await interrogatePath());
+}
+
+/* ===== ACT 4 ===== */
+
+// Aggressive confrontation
+async function aggressivePath() {
+    textArea.textContent = '';
+    showPortrait('malik.png', 'Officer Malik');
+
+    async function displaySection(sectionText) {
+        return new Promise((resolve) => {
+            textArea.textContent = sectionText;
+            clearChoices();
+            addChoice('Continue', resolve);
+        });
+    }
+
+    await displaySection(
+        "“That’s none of your business, Malik, but what I found out there might be.”\n" +
+        "You draw your gun and throw the cuffs at him. “Why don’t you go ahead and cuff yourself for me.”\n" +
+        "He grumbles: “Look at you, trying to throw your weight around like some kind of hotshot. Why don’t you tell me what you found out first, huh? Doubt it’s very much.”"
+    );
+
+    // Use safe checks to prevent undefined variable errors
+    if (state.fullApexData) {
+        await displaySection(
+            "“I got everything I needed, Malik down to your login info and your corporate sponsor.” You drop the bank on the desk. “Already backed up and secure too.”\n" +
+            "Malik is clearly taken by surprise. “You’re bluffing.”\n" +
+            "You respond: “Then why don’t you take a look? Got enough dirt on there to send you and Apex to the slammer.”\n" +
+            "He takes one look at the drive, your determination weighing over him. His demeanour changes entirely. He slumps, visibly distraught.\n" +
+            "“You’re right.” He drops against the wall and takes the cuffs in hand, staring you down as he puts them on."
+        );
+        state.outcomeMalik = 'CUFFED';
+        return act4Ending();
+    } else if (state.korFileDetour) {
+        await displaySection(
+            "“I got everything I needed, Malik down to the file you omitted on Kor and our PD’s little ‘sponsor’.” You drop the bank on the desk. “Already backed up and secure too.”\n" +
+            "Malik freezes. “You’re bluffing.”\n" +
+            "You respond coldly: “Take a look I’ve got enough dirt to send you and Apex to the slammer.”\n" +
+            "He takes one look at the drive, your determination weighing over him. His demeanour changes entirely. He slumps, visibly upset.\n" +
+            "“You’re right.” He drops against the wall and cuffs himself quietly."
+        );
+        state.outcomeMalik = 'CUFFED';
+        return act4Ending();
+    } else if (state.secretDocument || state.partialApexData || state.strixDetour) {
+        await displaySection(
+            "“I got plenty out of that place, Malik. I know all about the PD liaison and the transfers that were happening.”\n" +
+            "You say, low and steady: “I didn’t get everything. But I’ve got enough. Transfers. Liaison notes. A trail that leads straight to you.”\n" +
+            "Malik’s face goes pale. He tries to laugh it off. “You don’t have real proof a few invoices, a note. That’s not a case.”\n" +
+            "You let your silence do the work. He falters. “Look, I can explain. We were trying to keep people safe… you don’t understand how messy it gets”\n" +
+            "“You can explain that in court, but for now you’re staying here,” you cut in.\n" +
+            "He nods silently and takes a seat."
+        );
+        state.outcomeMalik = 'PASSIVE';
+        return act4Ending();
+    } else {
+        await displaySection(
+            "You know he’s right you found very little. But you do know he’s involved in some way, so you try to arrest him anyway with the shaky lead.\n" +
+            "“I don’t need to know exactly what happened to know how guilty you are. Your prints are all over this case, and because of that, I’m arresting you.”\n" +
+            "Malik looks down, then up. For a long second, both of you measure what the other might do next.\n" +
+            "“You’ve got literally nothing,” Malik says flatly. “I’m under no obligation to humour your case. And because of that, I’m out of here.”\n" +
+            "He stands and begins to walk toward the door. You panic he’s clearly guilty, and you can’t let him leave. You grab your gun and point it at him.\n" +
+            "“Don’t move. You’re under arrest, Malik,” you say sternly but nervously.\n" +
+            "Malik smirks. “I don’t have to listen to you, Kai. You have nothing and shooting me would achieve nothing.”\n" +
+            "He keeps walking. You’re out of time."
+        );
+
+        clearChoices();
+        addChoice('Shoot him', async () => {
+            state.outcomeMalik = 'DEAD';
+            await displaySection(
+                "You pull the trigger before you can convince yourself not to. The shot cracks. Malik goes down, a shocked look on his face. The room echoes with silence.\n" +
+                "You didn’t have any proof beforehand and now your only lead is gone. You slouch in a chair, reliving what you’ve done."
+            );
+            act4Ending();
+        });
+        addChoice('Let him leave', async () => {
+            state.outcomeMalik = 'ESCAPED';
+            await displaySection(
+                "You lower the gun. He closes the door slowly, without hurry. The engine of his car ignites the silence as the cruiser’s taillights fade into the night.\n" +
+                "You knew it would come to this a coward’s victory for him, and a slow burn for you. You sit alone in the darkness, wondering where you went wrong."
+            );
+            act4Ending();
+        });
+    }
+}
+
+// Interrogation path
+async function interrogatePath() {
+    textArea.textContent = '';
+    showPortrait('malik.png', 'Officer Malik');
+
+    async function displaySection(sectionText) {
+        return new Promise((resolve) => {
+            textArea.textContent = sectionText;
+            clearChoices();
+            addChoice('Continue', resolve);
+        });
+    }
+
+    await displaySection(
+        "You lock the door and sit opposite Malik. No theatrics, no gun, no cuffs tossed like a stunt. Your voice is flat and deliberate.\n" +
+        "“Malik,” you say, “I don’t want posturing. I want the truth. What happened to Britney? Why work with Apex?”\n" +
+        "He snorts and tries the old disdain. “You got nothing. You’re making a show.”\n" +
+        "You make the smallest of promises: “You cooperate you explain this cleanly in front of a judge. You don’t and I make sure the people who’ll listen get the rest of it.”"
+    );
+
+    clearChoices();
+    addChoice('Hardball him', async () => {
+        if (
+            state.fullApexData ||
+            state.korFileDetour ||
+            (state.strixDetour && state.archiveAcquired) ||
+            state.secretDocument ||
+            state.partialApexData
+        ) {
+            await displaySection(
+                "You place the evidence you have on the table in front of him. He sits lazily, still confident until midway through, his eyes open wide. You’ve got him nailed.\n" +
+                "He looks up at you. “Guess it’s over for me. I’ll comply… but you need to protect me from Apex.”"
+            );
+            state.outcomeMalik = 'COMPLIANT';
+        } else {
+            await displaySection(
+                "You place your evidence on the table. Malik smirks, unimpressed. “Alright, Kai. I’ll play your little game. Can’t be too bad.”\n" +
+                "His smirk hides disappointment, but you sense he knows more than he’s letting on."
+            );
+            state.outcomeMalik = 'PASSIVE';
+        }
+        act4Ending();
+    });
+
+    addChoice('Good Cop him', async () => {
+        await displaySection(
+            "“Look, Malik, whatever wrongdoings you’ve done, I’m sure we can talk it out through internal review. There’s no need to be hasty here.”\n" +
+            "He exhales sharply, smirking. “Alright, Kai. I’ll take your bargain. Better in your hands than Apex’s.”\n" +
+            "He relaxes, lighting a smoke. You can’t help but feel like you’re letting him off easy, but maybe justice will catch up eventually."
+        );
+        state.outcomeMalik = 'PASSIVE';
+        act4Ending();
+    });
+}
+
+
+// ACT 4: Ending based on Malik outcome
+async function act4Ending() {
+    textArea.textContent = '';
+    showSceneImage('policestation.png', 'Precinct');  // set relevant scene image
+    showPortrait('detective.png', 'Detective Kai');
+
+    async function displayTextWithContinue(text) {
+        return new Promise((resolve) => {
+            textArea.textContent = text;
+            clearChoices();
+            addChoice('Continue', resolve);
+        });
+    }
+
+    switch (state.outcomeMalik) {
+        case 'DEAD':
+            await displayTextWithContinue("As you sit in the darkness reliving your mistake, you get a phone call from an anonymous caller, his voice distorted to hide his identity.");
+            await displayTextWithContinue("“Honestly detective Kai, I couldn’t have asked for a better outcome, you tied up our loose end being Malik and you failed to learn anything at all. Considering all this I think your case is closed,” he laughs in a smug tone. “Not to worry we will release the info you failed to find anyway, Malik killed Britney much against our wishes, he did it on his own accord even putting us in trouble to begin with in an attempt to get in our ‘good graces’. We never cared about Britney or this investigation so I’m happy it’s over…. Enjoy a short retirement detective.”");
+            await displayTextWithContinue("You hear a brief loud crunch; it was a burner, no chance of tracing him… There isn’t much left for you to do at this point. The case is solved against you and you have nothing on Apex, leaving them to their corporate machinations. You’ll leave the report writing to the morning and head back to your apartment, racked with shame and guilt.");
+            state.ending = 'WORST';
+            break;
+
+        case 'ESCAPED':
+            await displayTextWithContinue("As you sit in the darkness reliving your mistake, you get a phone call from an anonymous caller, his voice distorted to hide his identity.");
+            await displayTextWithContinue("“Honestly detective Kai, this is a pretty good outcome for us. All we have to do is tie up our loose end being Malik and you failed to learn anything at all. Considering all this I think your case is closed,” he laughs in a smug tone. “Not to worry, we will release the info you failed to find anyway, Malik killed Britney much against our wishes, he did it on his own accord even putting us in trouble to begin with in an attempt to get in our ‘good graces’. We never cared about Britney or this investigation so I’m happy it’s over…. Enjoy a short retirement detective.”");
+            await displayTextWithContinue("You hear a brief loud crunch; it was a burner, no chance of tracing him… There isn’t much left for you to do at this point. The case is solved against you and you have nothing on Apex, leaving them to their corporate machinations. Malik will probably be dead by morning. At least you weren’t responsible for his death, but it’s hard to imagine a worse outcome for this case. You head to your apartment, head hung low, racked with shame.");
+            state.ending = 'BAD';
+            break;
+
+        case 'PASSIVE':
+            await displayTextWithContinue("As you sit in the darkness with Malik preparing the morning crew to handle this case, you get a buzzing in your pocket a phone call at this moment? Something is off, but you answer anyway.");
+            await displayTextWithContinue("“Not bad detective, you found the killer one Mister Malik, he killed Britney against our wishes and placed us under the spotlight. We would’ve preferred to have kept this all under wraps but now thanks to Malik much of this arrangement may come to life.”");
+            await displayTextWithContinue("You respond: “I don’t know who you are but you don’t scare me, I know some of your dirty secrets and I will bring them to …”");
+            await displayTextWithContinue("He cuts you off: “You know nothing, you solved the murder detective but the rest of this is beyond your ability. Relax, live a good life, and solve it.”");
+            await displayTextWithContinue("The line cuts after a loud crunch, a burner. You look Malik in the eyes and stare him down, knowing full well that he is actually the killer. You did it; you solved the case mostly on your own and you have the evidence needed. Apex is too big to bring down with what little you have without a case. You console yourself to the completion of your case and go home, head hung low, partially satisfied you didn’t manage to nail Apex in the way you wanted to.");
+            state.ending = 'DECENT';
+            break;
+
+        case 'COMPLIANT':
+            await displayTextWithContinue("You sit in silence as dawn breaks through the window. He doesn’t say a word; he doesn’t need to. The look in his eyes is a half confession, half relief.");
+            await displayTextWithContinue("The paperwork will be clean. The chain of evidence, solid enough. Malik will face a trial, and Britney’s family will get a name to curse. But the longer you look at him, the clearer it becomes: While Malik is to blame for the killing, it’s clear that Apex Security is the larger enemy here.");
+            await displayTextWithContinue("Your phone buzzes an anonymous caller. You answer.");
+            await displayTextWithContinue("A calm, composed voice filters through static. “Detective, you did well, better than we expected. Malik’s actions were reckless, his removal necessary. You’ve given the city closure, and us the distance we needed.”");
+            await displayTextWithContinue("You clench your jaw. “Apex?”");
+            await displayTextWithContinue("A soft chuckle. “Names don’t matter. You played your part. Enjoy the win, detective; they don’t come often.”");
+            await displayTextWithContinue("The call cuts off before you can speak again. Just another burner. You hang up, lean back, and stare at the wall, a victory that feels like defeat. Still, your case is closed. You gather your notes, write your closing statement, and head out into the morning haze.");
+            state.ending = 'GOOD';
+            break;
+
+        case 'CUFFED':
+            await displayTextWithContinue("The precinct is silent except for the soft clink of Malik’s cuffs against the desk. On your desk sits everything your investigation has come to: Apex’s shell companies, the PD records, the entire chain that led to Britney’s murder. You already sent copies to the press.");
+            await displayTextWithContinue("Your phone rings, an anonymous caller? You answer.");
+            await displayTextWithContinue("“Evening detective, seems like your investigation went well?”");
+            await displayTextWithContinue("You respond: “No thanks to you, I have the killer and all the evidence of your wrongdoing.”");
+            await displayTextWithContinue("There’s a pause, then laughter. “You think you won. But all you did was pull back the curtain. Someone will fill the vacuum, detective. It’s always the same story.”");
+            await displayTextWithContinue("You let the silence hang, then cut the line.");
+            await displayTextWithContinue("Outside, morning breaks over the skyline. The papers will call it a major corruption scandal, the newsfeeds will run it as ‘Detective Kai ends Apex PD conspiracy.’ But behind every headline, you know the truth: You only wounded the beast.");
+            await displayTextWithContinue("Still, Britney gets justice. Malik will testify. Apex’s network is crippled. For now, the city breathes easier. You lock the office door, step out into the fading orange light, and let yourself feel for the first time in years that maybe, just maybe, this one mattered.");
+            state.ending = 'BEST';
+            break;
+    }
+
+    clearChoices();
+    addChoice('Finish', () => {
+        textArea.textContent = "=== THE END ===";
+    });
+}
+/* ====== Start the game ====== */
+updateInventory();
+act1_scene1();
+
+</script>
+</body>
+</html>
+
