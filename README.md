@@ -25,4 +25,4 @@ Immersive UI
   - Styled with CSS for a dark, detective-themed aesthetic.
   - Smooth scene transitions with fade effects.
 
-No frameworks are required everything runs in a standard web browser.
+No frameworks are required everything runs in a standard web browser. to play simply download the code and open in any browser (I have omiitted the image files for ease of viewing).
